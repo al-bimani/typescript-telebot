@@ -21,11 +21,6 @@
     "outDir": "build",
     "removeComments": true,
     "skipLibCheck": true,
-    "paths": {
-      "@*": ["/*"],
-      "@utils/*": ["utils/*"],
-      "@v1/*": ["v1/*"]
-    }
   },
   "include": ["**/*.ts"]
 }
