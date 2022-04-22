@@ -5,9 +5,10 @@ import { StringSession } from 'telegram/sessions';
 import { NewMessage, NewMessageEvent } from 'telegram/events';
 import { Api } from 'telegram';
 import input from 'input';
-import { Canvas, Image } from 'canvas';
+import { Canvas, createCanvas, Image } from 'canvas';
 import Konva from 'konva/cmj';
 import Vibrant from 'node-vibrant';
+import bigInt from 'big-integer';
 
 dotenv.config();
 
@@ -31,38 +32,94 @@ const stringSession = new StringSession(process.env.SESSION); // fill this later
       incoming: false,
     }),
   );
-})();
 
-async function handleOutgoingMessage(event: NewMessageEvent): Promise<void> {
-  const client = event.client;
-  const content = event.message.message;
-  const chat = (await event.message.getInputChat()) as Api.Chat; // event.message._inputChat
+  client.addEventHandler(async (e: Api.TypeUpdate) => {
+    const update = e.originalArgs as Api.UpdateNewMessage;
+    const message = update.message;
+    if (!message) return;
 
-  if (!content?.startsWith(prefix)) return;
+    if (message.className === 'MessageService') {
+      if (message.action.className === 'MessageActionChatDeleteUser') {
+        // User Left
+        const action = (message.action as Api.MessageActionChatDeleteUser);
+        handleUserLeave(
+          await getUserByBigIntId(action.userId),
+          message.peerId
+        )
+      } else if (message.action.className === 'MessageActionChatAddUser') {
+        // User Joined
+        const action = (message.action as Api.MessageActionChatAddUser);
+        handleUserJoin(
+          await getUserByBigIntId(action.users[0]),
+          message.peerId
+        )
+      }
+    }
+  });
 
-  const [command, ...args] = content.slice(prefix.length).split(/ +/g);
+  async function getUserByBigIntId(id: bigInt.BigInteger): Promise<Api.TypeUser> {
+    const result = await client.invoke(
+      new Api.users.GetFullUser({
+        id
+      })
+    )
 
-  if (command === 'spam') {
-    const times = parseInt(args[0]);
-    const contentFixed = content
-      .slice(prefix.length)
-      .trim()
-      .slice(command.length)
-      .trim()
-      .slice(args[0]?.length)
-      .trim();
+    return result.users[0];
+  }
 
-    for (let i = 0; i < times; i++) {
-      await client.sendMessage(chat, { message: contentFixed });
+  async function handleUserJoin(user: any, peer: Api.TypeEntityLike) {
+    welcomeUser(user.firstName ?? user.username, user.id, peer);
+  }
+
+  async function handleUserLeave(user: any, peer: Api.TypeEntityLike) {
+    await client.sendMessage(peer, {
+      message: `User ${user.firstName ?? user.username} left the chat`,
+    });
+  }
+
+  async function handleOutgoingMessage(event: NewMessageEvent): Promise<void> {
+    const client = event.client;
+    // const sender = await event.message.getSender() as Api.User;
+    const content = event.message.message;
+    const chat = (await event.message.getInputChat()) as Api.Chat; // event.message._inputChat
+
+    if (!content?.startsWith(prefix)) return;
+
+    const [command, ...args] = content.slice(prefix.length).split(/ +/g);
+
+    if (command === 'spam') {
+      const times = parseInt(args[0]);
+      const contentFixed = content
+        .slice(prefix.length)
+        .trim()
+        .slice(command.length)
+        .trim()
+        .slice(args[0]?.length)
+        .trim();
+
+      for (let i = 0; i < times; i++) {
+        await client.sendMessage(chat, { message: contentFixed });
+      }
     }
   }
 
-  if (command === 'welcome') {
+  async function login(client: TelegramClient): Promise<void> {
+    await client.start({
+      phoneNumber: async () => await input.text('Please enter your number: '),
+      password: async () => await input.text('Please enter your password: '),
+      phoneCode: async () => await input.text('Please enter the code you received: '),
+      onError: (err) => console.log(err),
+    });
+    console.log('You should now be connected.');
+    if (!process.env.SESSION) console.log(client.session.save()); // Save this string to avoid logging in again
+  };
+
+  async function welcomeUser(name: string, id: bigInt.BigInteger, peer: Api.TypeEntityLike) {
     const W = 1024,
       H = 330;
-    const mentions = content.match(/\B@\w+/gim);
-    const buffer = (await client.downloadProfilePhoto(mentions[0])) as Buffer;
 
+    const buffer = await getPhotoBuff(id) as Buffer
+    //#229ED9
     const avatar = new Image();
     avatar.src = buffer;
 
@@ -158,7 +215,7 @@ async function handleOutgoingMessage(event: NewMessageEvent): Promise<void> {
       y: 70,
       width: 500,
       align: 'center',
-      text: mentions[0],
+      text: name,
       fontSize: 40,
       fontFamily: 'Arial, sans-serif',
       fill: '#FFF',
@@ -183,20 +240,27 @@ async function handleOutgoingMessage(event: NewMessageEvent): Promise<void> {
     // @ts-ignore
     buff.name = 'welcome.png';
 
-    await client.sendMessage(chat, {
-      message: `**Hello, ${mentions[0]}; Welcome!**`,
+    await client.sendMessage(peer, {
+      message: `**Hello, ${name}; Welcome!**`,
       file: buff,
     });
-  } // -welcome @ahlinz
-}
+  }
 
-async function login(client: TelegramClient): Promise<void> {
-  await client.start({
-    phoneNumber: async () => await input.text('Please enter your number: '),
-    password: async () => await input.text('Please enter your password: '),
-    phoneCode: async () => await input.text('Please enter the code you received: '),
-    onError: (err) => console.log(err),
-  });
-  console.log('You should now be connected.');
-  if (!process.env.SESSION) console.log(client.session.save()); // Save this string to avoid logging in again
-}
+  async function getPhotoBuff(id: bigInt.BigInteger) {
+    let buff = await client.downloadProfilePhoto(id, {
+      isBig: true
+    }) as Buffer;
+
+    if (buff.length === 0) {
+      const photo = createCanvas(512, 512);
+      const pctx = photo.getContext('2d');
+
+      pctx.fillStyle = '#229ED9';
+      pctx.fillRect(0, 0, 512, 512);
+
+      buff = photo.toBuffer('image/png');
+    }
+
+    return buff;
+  }
+})();
