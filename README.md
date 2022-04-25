@@ -22,5 +22,5 @@ You can get this by doing the following:
 - Follow the instructions in the terminal
 - Copy the token you see there into `SESSION` and save the file
 
-
-
+## Stay in touch
+I'm Ahlin Chan at [Emindpire's Discord server](https://discord.gg/wrjjbvEVQq)
